@@ -1,0 +1,34 @@
+modules = ["nodejs-24"]
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+VITE_FIREBASE_API_KEY = "AIzaSyC4aAB0ODXO70exSLAfIaASo91YlnWPWxU"
+VITE_FIREBASE_AUTH_DOMAIN = "alpha-620b1.firebaseapp.com"
+VITE_FIREBASE_PROJECT_ID = "alpha-620b1"
+VITE_FIREBASE_STORAGE_BUCKET = "alpha-620b1.firebasestorage.app"
+VITE_FIREBASE_MESSAGING_SENDER_ID = "124984660406"
+VITE_FIREBASE_APP_ID = "1:124984660406:web:fe9b1b73c97c76f8967117"
+VITE_FIREBASE_MEASUREMENT_ID = "G-JTSL48HGP0"
