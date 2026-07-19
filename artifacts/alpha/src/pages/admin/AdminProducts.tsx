@@ -7,8 +7,7 @@ import {
   updateDoc,
   deleteDoc,
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage } from "../../firebase";
+import { db } from "../../firebase";
 import { formatINR } from "../../lib/currency";
 import type { Product } from "../../types/product";
 import {
@@ -39,6 +38,33 @@ const COLOR_PRESETS = [
   "#22c55e", "#3b82f6", "#f59e0b", "#ef4444",
   "#8b5cf6", "#ec4899", "#14b8a6", "#f97316",
 ];
+
+// Cloudinary config
+const CLOUDINARY_CLOUD_NAME = "jonzwx3f";
+const CLOUDINARY_UPLOAD_PRESET = "alpha-commerce";
+const CLOUDINARY_UPLOAD_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+
+async function uploadImageToCloudinary(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+
+  const res = await fetch(CLOUDINARY_UPLOAD_URL, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    throw new Error("Image upload failed. Please try again.");
+  }
+
+  const data = await res.json();
+  if (!data.secure_url) {
+    throw new Error("Image upload did not return a valid URL.");
+  }
+
+  return data.secure_url as string;
+}
 
 interface ProductForm {
   name: string;
@@ -180,12 +206,7 @@ export function AdminProducts() {
       let imageUrl = editingProduct?.imageUrl || "";
 
       if (imageFile) {
-        const productRef = editingProduct
-          ? doc(db, "products", editingProduct.id)
-          : doc(collection(db, "products"));
-        const storageRef = ref(storage, `products/${productRef.id}/${Date.now()}_${imageFile.name}`);
-        const snapshot = await uploadBytes(storageRef, imageFile);
-        imageUrl = await getDownloadURL(snapshot.ref);
+        imageUrl = await uploadImageToCloudinary(imageFile);
       }
 
       const data = {
