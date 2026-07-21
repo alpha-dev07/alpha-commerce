@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { db } from "../firebase";
 import { PromoBanner } from "../components/PromoBanner";
 import { ProductCard } from "../components/ProductCard";
 import { BottomNav } from "../components/BottomNav";
@@ -8,7 +10,16 @@ import { CategoryFilter } from "../components/CategoryFilter";
 import { useProducts } from "../hooks/useProducts";
 import { useAuth } from "../context/AuthContext";
 import { seedProductsIfEmpty } from "../lib/seedProducts";
-import { Bell, Package } from "lucide-react";
+import { Bell, Package, MapPin, X, Check, Loader2 } from "lucide-react";
+
+interface Address {
+  id: string;
+  label: string;
+  line1: string;
+  city: string;
+  zip: string;
+  isDefault: boolean;
+}
 
 export function Home() {
   const { user } = useAuth();
@@ -17,9 +28,68 @@ export function Home() {
   const [activeCategory, setActiveCategory] = useState("");
   const navigate = useNavigate();
 
+  // Delivery address sheet state
+  const [showAddressSheet, setShowAddressSheet] = useState(false);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [addressesLoading, setAddressesLoading] = useState(true);
+  const [savingAddressId, setSavingAddressId] = useState<string | null>(null);
+
   useEffect(() => {
     seedProductsIfEmpty().catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setAddresses([]);
+      setAddressesLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setAddressesLoading(true);
+    getDoc(doc(db, "users", user.uid))
+      .then((snap) => {
+        if (!isMounted) return;
+        const data = snap.exists() ? snap.data() : null;
+        const list: Address[] = Array.isArray(data?.addresses) ? data.addresses : [];
+        setAddresses(list);
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (isMounted) setAddressesLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.uid]);
+
+  const defaultAddress = addresses.find((a) => a.isDefault) ?? addresses[0];
+
+  const handleOpenAddressSheet = () => {
+    setShowAddressSheet(true);
+  };
+
+  const handleCloseAddressSheet = () => {
+    setShowAddressSheet(false);
+  };
+
+  const handleSelectAddress = async (id: string) => {
+    if (!user) return;
+    const previous = addresses;
+    const updated = addresses.map((a) => ({ ...a, isDefault: a.id === id }));
+    setAddresses(updated);
+    setSavingAddressId(id);
+    setShowAddressSheet(false);
+    try {
+      await updateDoc(doc(db, "users", user.uid), { addresses: updated });
+    } catch (err) {
+      console.error(err);
+      setAddresses(previous);
+    } finally {
+      setSavingAddressId(null);
+    }
+  };
 
   const isFiltered = query.trim() !== "" || activeCategory !== "";
 
@@ -44,16 +114,24 @@ export function Home() {
       {/* Sticky Header */}
       <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border/50 pt-safe">
         <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex flex-col">
+          <button
+            type="button"
+            onClick={handleOpenAddressSheet}
+            data-testid="btn-delivery-address"
+            className="flex flex-col items-start active:opacity-70 transition-opacity"
+          >
             <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
               Delivering to
             </span>
             <span className="text-sm font-semibold flex items-center gap-1">
-              Home · 10001{" "}
+              {defaultAddress
+                ? `${defaultAddress.label} · ${defaultAddress.zip}`
+                : "Home · 10001"}{" "}
               <span className="text-primary text-xs">▼</span>
             </span>
-          </div>
+          </button>
           <button
+            type="button"
             data-testid="btn-notifications"
             onClick={() => navigate("/notifications")}
             className="w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center active:scale-90 transition-transform"
@@ -92,7 +170,11 @@ export function Home() {
                 <Package className="w-12 h-12 text-muted-foreground/30" />
                 <p className="text-sm text-muted-foreground">No products found</p>
                 <button
-                  onClick={() => { setQuery(""); setActiveCategory(""); }}
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    setActiveCategory("");
+                  }}
                   className="text-sm text-primary font-medium"
                   data-testid="btn-clear-filters"
                 >
@@ -124,6 +206,7 @@ export function Home() {
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold">Featured</h3>
                   <button
+                    type="button"
                     className="text-sm font-medium text-primary active:opacity-70 transition-opacity"
                     onClick={() => setActiveCategory("")}
                   >
@@ -146,6 +229,7 @@ export function Home() {
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold">Best Sellers</h3>
                   <button
+                    type="button"
                     className="text-sm font-medium text-primary active:opacity-70 transition-opacity"
                     onClick={() => setActiveCategory("")}
                   >
@@ -178,7 +262,77 @@ export function Home() {
       </div>
 
       <BottomNav />
+
+      {/* Delivery Address Bottom Sheet */}
+      {showAddressSheet && (
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-black/40 animate-in fade-in duration-200"
+          onClick={handleCloseAddressSheet}
+        >
+          <div
+            className="w-full bg-card rounded-t-3xl max-h-[80vh] flex flex-col animate-in slide-in-from-bottom duration-300"
+            onClick={(e) => e.stopPropagation()}
+            data-testid="address-sheet"
+          >
+            <div className="flex items-center justify-center pt-3">
+              <div className="w-10 h-1 rounded-full bg-border" />
+            </div>
+
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
+              <h2 className="text-base font-bold">Delivery Address</h2>
+              <button
+                type="button"
+                onClick={handleCloseAddressSheet}
+                className="w-8 h-8 rounded-full bg-muted flex items-center justify-center active:scale-90 transition-transform"
+                data-testid="btn-close-address-sheet"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto px-4 py-2 pb-6">
+              {addressesLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : addresses.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-2">
+                  <MapPin className="w-8 h-8 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">No saved addresses</p>
+                </div>
+              ) : (
+                <div className="flex flex-col divide-y divide-border">
+                  {addresses.map((address) => (
+                    <button
+                      type="button"
+                      key={address.id}
+                      onClick={() => handleSelectAddress(address.id)}
+                      disabled={savingAddressId === address.id}
+                      data-testid={`address-option-${address.id}`}
+                      className="w-full flex items-center gap-3 py-3.5 text-left disabled:opacity-60"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                        <MapPin className="w-4.5 h-4.5 text-primary" />
+                      </div>
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className="text-sm font-semibold">{address.label}</span>
+                        <span className="text-xs text-muted-foreground truncate">
+                          {address.line1}, {address.city} {address.zip}
+                        </span>
+                      </div>
+                      {savingAddressId === address.id ? (
+                        <Loader2 className="w-4 h-4 text-muted-foreground animate-spin shrink-0" />
+                      ) : address.isDefault ? (
+                        <Check className="w-4 h-4 text-primary shrink-0" />
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
