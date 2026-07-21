@@ -22,11 +22,30 @@ import {
   PieChart,
   Inbox,
   PackageSearch,
+  PackagePlus,
   CalendarCheck,
   Loader2,
+  Sparkles,
 } from "lucide-react";
 import type { Order, OrderStatus } from "../../types/order";
 import type { Product } from "../../types/product";
+
+// ---------------------------------------------------------------------------
+// Local types
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal shape we rely on from the `users` collection. Kept local (rather
+ * than imported from a shared types file) since the dashboard only ever
+ * needs an id + a couple of optional display fields for the customer count.
+ */
+interface AdminCustomerDoc {
+  id: string;
+  name?: string;
+  email?: string;
+  createdAt?: number;
+  role?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Status maps (with safe fallbacks in case a document has a bad/missing value)
@@ -115,11 +134,16 @@ function statusLabel(status?: OrderStatus) {
   return status && STATUS_LABELS[status] ? STATUS_LABELS[status] : DEFAULT_STATUS_LABEL;
 }
 
+// NOTE: paths below match the existing routes referenced elsewhere in this
+// file (e.g. handleViewAllOrders -> "/admin/orders"). "Add Product" assumes
+// a "/admin/products/new" route exists in your router — adjust if your
+// product-creation route differs.
 const QUICK_ACTIONS = [
-  { label: "Products", icon: Package, path: "/admin/products", color: "text-primary", bg: "bg-primary/10 border-primary/20" },
+  { label: "Add Product", icon: PackagePlus, path: "/admin/products/new", color: "text-primary", bg: "bg-primary/10 border-primary/20" },
   { label: "Orders", icon: ClipboardList, path: "/admin/orders", color: "text-blue-400", bg: "bg-blue-400/10 border-blue-400/20" },
-  { label: "Users", icon: Users, path: "/admin/users", color: "text-violet-400", bg: "bg-violet-400/10 border-violet-400/20" },
   { label: "Coupons", icon: Tag, path: "/admin/coupons", color: "text-amber-400", bg: "bg-amber-400/10 border-amber-400/20" },
+  { label: "Users", icon: Users, path: "/admin/users", color: "text-violet-400", bg: "bg-violet-400/10 border-violet-400/20" },
+  { label: "Products", icon: Package, path: "/admin/products", color: "text-teal-400", bg: "bg-teal-400/10 border-teal-400/20" },
   { label: "Settings", icon: Settings, path: "/admin/settings", color: "text-rose-400", bg: "bg-rose-400/10 border-rose-400/20" },
 ] as const;
 
@@ -127,15 +151,17 @@ const QUICK_ACTIONS = [
 // Small presentational helpers
 // ---------------------------------------------------------------------------
 
-function StatCardSkeleton() {
+function StatCardSkeleton({ hero = false }: { hero?: boolean }) {
   return (
     <div
-      className="flex flex-col gap-3 p-4 rounded-2xl bg-card border border-border animate-pulse"
+      className={`flex flex-col gap-3 rounded-2xl bg-card border border-border animate-pulse ${
+        hero ? "p-5" : "p-4"
+      }`}
       aria-hidden="true"
     >
-      <div className="w-9 h-9 rounded-xl bg-muted/30" />
+      <div className={`rounded-xl bg-muted/30 ${hero ? "w-10 h-10" : "w-9 h-9"}`} />
       <div className="flex flex-col gap-1.5">
-        <div className="h-5 w-16 rounded bg-muted/30" />
+        <div className={`rounded bg-muted/30 ${hero ? "h-6 w-24" : "h-5 w-16"}`} />
         <div className="h-3 w-20 rounded bg-muted/20" />
       </div>
     </div>
@@ -189,6 +215,30 @@ function EmptyState({
   );
 }
 
+/** Wraps a section so it fades/slides in once the initial data has settled. */
+function Reveal({
+  show,
+  delayMs = 0,
+  children,
+}: {
+  show: boolean;
+  delayMs?: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="transition-all duration-500 ease-out motion-reduce:transition-none motion-reduce:transform-none"
+      style={{
+        opacity: show ? 1 : 0,
+        transform: show ? "translateY(0px)" : "translateY(8px)",
+        transitionDelay: show ? `${delayMs}ms` : "0ms",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -196,10 +246,13 @@ function EmptyState({
 export function AdminDashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<AdminCustomerDoc[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [barsAnimated, setBarsAnimated] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const { adminUser } = useAdminAuth();
   const navigate = useNavigate();
@@ -229,21 +282,37 @@ export function AdminDashboard() {
       () => setLoadingProducts(false)
     );
 
+    // Customers — mirrors the "/admin/users" Quick Action, reading the same
+    // "users" collection so the summary card and the Users page stay in sync.
+    const unsubCustomers = onSnapshot(
+      collection(db, "users"),
+      (snap) => {
+        setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AdminCustomerDoc)));
+        setLoadingCustomers(false);
+      },
+      () => setLoadingCustomers(false)
+    );
+
     return () => {
       unsubOrders();
       unsubProducts();
+      unsubCustomers();
     };
   }, []);
 
-  // Trigger the bar-chart grow-in animation once initial data has settled
+  // Trigger the bar-chart grow-in animation + section reveal once initial
+  // data has settled.
   useEffect(() => {
     if (!loadingOrders) {
-      const id = requestAnimationFrame(() => setBarsAnimated(true));
+      const id = requestAnimationFrame(() => {
+        setBarsAnimated(true);
+        setMounted(true);
+      });
       return () => cancelAnimationFrame(id);
     }
   }, [loadingOrders]);
 
-  const loading = loadingOrders || loadingProducts;
+  const loading = loadingOrders || loadingProducts || loadingCustomers;
 
   // -------------------------------------------------------------------------
   // Manual refresh (used by pull-to-refresh). onSnapshot already keeps data
@@ -253,12 +322,14 @@ export function AdminDashboard() {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const [orderSnap, productSnap] = await Promise.all([
+      const [orderSnap, productSnap, customerSnap] = await Promise.all([
         getDocs(collection(db, "orders")),
         getDocs(collection(db, "products")),
+        getDocs(collection(db, "users")),
       ]);
       setOrders(orderSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Order)));
       setProducts(productSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product)));
+      setCustomers(customerSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AdminCustomerDoc)));
     } catch (err) {
       console.error("Failed to refresh dashboard data", err);
     } finally {
@@ -311,6 +382,7 @@ export function AdminDashboard() {
     const monthRevenue = monthOrders.reduce((s, o) => s + (o.total ?? 0), 0);
 
     const avgOrderValue = safeOrders.length > 0 ? Math.round(revenue / safeOrders.length) : 0;
+    const todayAvgOrderValue = todayOrders.length > 0 ? Math.round(todayRevenue / todayOrders.length) : 0;
     const deliveredOrders = safeOrders.filter((o) => o.status === "delivered").length;
     const pendingOrders = safeOrders.filter((o) => o.status !== "delivered").length;
 
@@ -323,20 +395,35 @@ export function AdminDashboard() {
       revenueChangePct = 0;
     }
 
+    let orderCountChangePct: number | null = null;
+    if (yesterdayOrders.length > 0) {
+      orderCountChangePct = Math.round(
+        ((todayOrders.length - yesterdayOrders.length) / yesterdayOrders.length) * 100
+      );
+    } else if (todayOrders.length > 0) {
+      orderCountChangePct = 100;
+    } else {
+      orderCountChangePct = 0;
+    }
+
     return {
       products: products.filter((p) => !!p?.id).length,
+      customers: customers.filter((c) => !!c?.id).length,
       orders: safeOrders.length,
       revenue,
       todayRevenue,
+      yesterdayRevenue,
       monthRevenue,
       avgOrderValue,
+      todayAvgOrderValue,
       deliveredOrders,
       pendingOrders,
       todayOrderCount: todayOrders.length,
       monthOrderCount: monthOrders.length,
       revenueChangePct,
+      orderCountChangePct,
     };
-  }, [orders, products]);
+  }, [orders, products, customers]);
 
   const recentOrders = useMemo(
     () =>
@@ -403,26 +490,9 @@ export function AdminDashboard() {
     return "Good evening";
   }, []);
 
-  const statCards = useMemo(
+  // Hero summary — the four headline numbers requested for the dashboard.
+  const heroCards = useMemo(
     () => [
-      {
-        key: "products",
-        label: "Products",
-        value: stats.products,
-        icon: Package,
-        color: "text-primary",
-        bg: "bg-primary/10 border-primary/20",
-        format: "number" as const,
-      },
-      {
-        key: "orders",
-        label: "Total Orders",
-        value: stats.orders,
-        icon: ClipboardList,
-        color: "text-blue-400",
-        bg: "bg-blue-400/10 border-blue-400/20",
-        format: "number" as const,
-      },
       {
         key: "revenue",
         label: "Revenue",
@@ -433,6 +503,40 @@ export function AdminDashboard() {
         format: "currency" as const,
       },
       {
+        key: "orders",
+        label: "Orders",
+        value: stats.orders,
+        icon: ClipboardList,
+        color: "text-blue-400",
+        bg: "bg-blue-400/10 border-blue-400/20",
+        format: "number" as const,
+      },
+      {
+        key: "products",
+        label: "Products",
+        value: stats.products,
+        icon: Package,
+        color: "text-primary",
+        bg: "bg-primary/10 border-primary/20",
+        format: "number" as const,
+      },
+      {
+        key: "customers",
+        label: "Customers",
+        value: stats.customers,
+        icon: Users,
+        color: "text-violet-400",
+        bg: "bg-violet-400/10 border-violet-400/20",
+        format: "number" as const,
+      },
+    ],
+    [stats]
+  );
+
+  // Secondary metrics — supporting detail beneath the hero row.
+  const statCards = useMemo(
+    () => [
+      {
         key: "pending",
         label: "Pending",
         value: stats.pendingOrders,
@@ -442,23 +546,22 @@ export function AdminDashboard() {
         format: "number" as const,
       },
       {
-        key: "todayRevenue",
-        label: "Today's Revenue",
-        value: stats.todayRevenue,
-        icon: TrendingUp,
-        color: "text-emerald-400",
-        bg: "bg-emerald-400/10 border-emerald-400/20",
-        format: "currency" as const,
-        trendPct: stats.revenueChangePct,
+        key: "delivered",
+        label: "Delivered",
+        value: stats.deliveredOrders,
+        icon: CheckCircle2,
+        color: "text-primary",
+        bg: "bg-primary/10 border-primary/20",
+        format: "number" as const,
       },
       {
-        key: "todayOrders",
-        label: "Today's Orders",
-        value: stats.todayOrderCount,
-        icon: CalendarCheck,
-        color: "text-teal-400",
-        bg: "bg-teal-400/10 border-teal-400/20",
-        format: "number" as const,
+        key: "avgOrderValue",
+        label: "Avg. Order Value",
+        value: stats.avgOrderValue,
+        icon: ShoppingBag,
+        color: "text-fuchsia-400",
+        bg: "bg-fuchsia-400/10 border-fuchsia-400/20",
+        format: "currency" as const,
       },
       {
         key: "monthRevenue",
@@ -473,27 +576,9 @@ export function AdminDashboard() {
         key: "monthOrders",
         label: "This Month's Orders",
         value: stats.monthOrderCount,
-        icon: ClipboardList,
+        icon: CalendarCheck,
         color: "text-indigo-400",
         bg: "bg-indigo-400/10 border-indigo-400/20",
-        format: "number" as const,
-      },
-      {
-        key: "avgOrderValue",
-        label: "Avg. Order Value",
-        value: stats.avgOrderValue,
-        icon: ShoppingBag,
-        color: "text-fuchsia-400",
-        bg: "bg-fuchsia-400/10 border-fuchsia-400/20",
-        format: "currency" as const,
-      },
-      {
-        key: "delivered",
-        label: "Delivered",
-        value: stats.deliveredOrders,
-        icon: CheckCircle2,
-        color: "text-primary",
-        bg: "bg-primary/10 border-primary/20",
         format: "number" as const,
       },
     ],
@@ -523,7 +608,7 @@ export function AdminDashboard() {
   return (
     <div
       ref={scrollRef}
-      className="relative flex flex-col gap-6 px-4 py-5 overflow-y-auto"
+      className="relative flex flex-col gap-7 px-4 py-5 overflow-y-auto"
       data-testid="page-admin-dashboard"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
@@ -548,166 +633,243 @@ export function AdminDashboard() {
       </div>
 
       {/* Greeting */}
-      <div className="flex flex-col gap-0.5">
-        <h2 className="text-xl sm:text-2xl font-bold tracking-tight">{greeting} 👋</h2>
-        <p className="text-sm text-muted-foreground truncate">{adminUser?.email ?? "Admin"}</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-1.5">
+            {greeting}
+            <span aria-hidden="true">👋</span>
+          </h2>
+          <p className="text-sm text-muted-foreground truncate">{adminUser?.email ?? "Admin"}</p>
+        </div>
+        <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold shrink-0">
+          <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+          Alpha Commerce
+        </div>
       </div>
 
-      {/* Stat cards */}
+      {/* Hero summary: Revenue, Orders, Products, Customers */}
       {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <StatCardSkeleton key={i} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <StatCardSkeleton key={i} hero />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-          {statCards.map(({ key, label, value, icon: Icon, color, bg, format, trendPct }) => (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {heroCards.map(({ key, label, value, icon: Icon, color, bg, format }) => (
             <div
               key={key}
-              className="flex flex-col gap-3 p-4 rounded-2xl bg-card border border-border shadow-sm transition-all duration-200 active:scale-[0.97] hover:border-border/80 hover:shadow-md"
+              className="flex flex-col gap-3 p-5 rounded-2xl bg-card border border-border shadow-sm transition-all duration-200 active:scale-[0.97] hover:border-border/80 hover:shadow-md"
               role="group"
               aria-label={`${label}: ${format === "currency" ? formatINR(value) : value.toLocaleString("en-IN")}`}
             >
-              <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${bg}`}>
+              <div className={`w-10 h-10 rounded-xl border flex items-center justify-center ${bg}`}>
                 <Icon className={`w-5 h-5 ${color}`} aria-hidden="true" />
               </div>
               <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`text-lg sm:text-xl font-bold ${color}`}>
-                    {format === "currency" ? formatINR(value) : value.toLocaleString("en-IN")}
-                  </span>
-                  {typeof trendPct === "number" && (
-                    <span
-                      className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                        trendPct >= 0
-                          ? "text-emerald-400 bg-emerald-400/10"
-                          : "text-rose-400 bg-rose-400/10"
-                      }`}
-                      aria-label={`${trendPct >= 0 ? "up" : "down"} ${Math.abs(trendPct)} percent versus yesterday`}
-                    >
-                      {trendPct >= 0 ? (
-                        <TrendingUp className="w-2.5 h-2.5" aria-hidden="true" />
-                      ) : (
-                        <TrendingDown className="w-2.5 h-2.5" aria-hidden="true" />
-                      )}
-                      {Math.abs(trendPct)}%
-                    </span>
-                  )}
-                </div>
+                <span className={`text-xl sm:text-2xl font-bold ${color}`}>
+                  {format === "currency" ? formatINR(value) : value.toLocaleString("en-IN")}
+                </span>
                 <span className="text-xs text-muted-foreground">{label}</span>
-                {typeof trendPct === "number" && (
-                  <span className="text-[10px] text-muted-foreground/70">vs yesterday</span>
-                )}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Revenue trend badge */}
-      {!loading && stats.revenue > 0 && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-primary/5 border border-primary/20">
-          <TrendingUp className="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
-          <span className="text-xs text-primary font-medium">
-            Total revenue across {stats.orders} orders — avg {formatINR(stats.avgOrderValue)} per order
-          </span>
+      {/* Today's Sales */}
+      {loading ? (
+        <ChartSkeleton />
+      ) : (
+        <Reveal show={mounted} delayMs={40}>
+          <div className="relative overflow-hidden flex flex-col gap-4 p-5 rounded-2xl bg-gradient-to-br from-primary/10 via-card to-card border border-primary/20 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CalendarCheck className="w-4 h-4 text-primary" aria-hidden="true" />
+                <h3 className="text-sm font-bold">Today's Sales</h3>
+              </div>
+              {typeof stats.revenueChangePct === "number" && (
+                <span
+                  className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                    stats.revenueChangePct >= 0
+                      ? "text-emerald-400 bg-emerald-400/10"
+                      : "text-rose-400 bg-rose-400/10"
+                  }`}
+                  aria-label={`Revenue ${stats.revenueChangePct >= 0 ? "up" : "down"} ${Math.abs(
+                    stats.revenueChangePct
+                  )} percent versus yesterday`}
+                >
+                  {stats.revenueChangePct >= 0 ? (
+                    <TrendingUp className="w-2.5 h-2.5" aria-hidden="true" />
+                  ) : (
+                    <TrendingDown className="w-2.5 h-2.5" aria-hidden="true" />
+                  )}
+                  {Math.abs(stats.revenueChangePct)}% vs yesterday
+                </span>
+              )}
+            </div>
+
+            {stats.todayOrderCount === 0 ? (
+              <EmptyState
+                icon={Inbox}
+                title="No sales yet today"
+                subtitle="Today's revenue and orders will appear here as they come in."
+              />
+            ) : (
+              <div className="grid grid-cols-3 divide-x divide-border">
+                <div className="flex flex-col gap-0.5 pr-3">
+                  <span className="text-lg sm:text-xl font-bold text-primary">{formatINR(stats.todayRevenue)}</span>
+                  <span className="text-[11px] text-muted-foreground">Revenue</span>
+                </div>
+                <div className="flex flex-col gap-0.5 px-3">
+                  <span className="text-lg sm:text-xl font-bold">{stats.todayOrderCount}</span>
+                  <span className="text-[11px] text-muted-foreground">Orders</span>
+                </div>
+                <div className="flex flex-col gap-0.5 pl-3">
+                  <span className="text-lg sm:text-xl font-bold">{formatINR(stats.todayAvgOrderValue)}</span>
+                  <span className="text-[11px] text-muted-foreground">Avg. order</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </Reveal>
+      )}
+
+      {/* Secondary stats */}
+      {loading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <StatCardSkeleton key={i} />
+          ))}
         </div>
+      ) : (
+        <Reveal show={mounted} delayMs={80}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+            {statCards.map(({ key, label, value, icon: Icon, color, bg, format }) => (
+              <div
+                key={key}
+                className="flex flex-col gap-3 p-4 rounded-2xl bg-card border border-border shadow-sm transition-all duration-200 active:scale-[0.97] hover:border-border/80 hover:shadow-md"
+                role="group"
+                aria-label={`${label}: ${format === "currency" ? formatINR(value) : value.toLocaleString("en-IN")}`}
+              >
+                <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${bg}`}>
+                  <Icon className={`w-5 h-5 ${color}`} aria-hidden="true" />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className={`text-lg sm:text-xl font-bold ${color}`}>
+                    {format === "currency" ? formatINR(value) : value.toLocaleString("en-IN")}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{label}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Reveal>
       )}
 
       {/* Revenue Overview chart */}
       {loading ? (
         <ChartSkeleton />
       ) : (
-        <div className="flex flex-col gap-3 p-4 rounded-2xl bg-card border border-border shadow-sm">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-bold">Revenue Overview (Last 7 Days)</h3>
-          </div>
-          {stats.revenue === 0 ? (
-            <EmptyState icon={BarChart3} title="No revenue yet" subtitle="Revenue will appear here once orders come in." />
-          ) : (
-            <div
-              className="flex items-end justify-between gap-1.5 sm:gap-2 h-32 px-1"
-              role="img"
-              aria-label="Bar chart of revenue for the last 7 days"
-            >
-              {revenueTrend.days.map((d, i) => {
-                const heightPct = Math.max(4, Math.round((d.total / revenueTrend.max) * 100));
-                return (
-                  <div key={i} className="flex flex-col items-center gap-1.5 flex-1 h-full justify-end min-w-0">
-                    <span className="text-[9px] text-muted-foreground truncate">
-                      {d.total > 0 ? formatINR(d.total) : ""}
-                    </span>
-                    <div className="w-full h-full flex items-end">
-                      <div
-                        className="w-full rounded-md bg-primary/80 transition-all ease-out hover:bg-primary"
-                        style={{
-                          height: barsAnimated ? `${heightPct}%` : "0%",
-                          transitionDuration: "700ms",
-                          transitionDelay: `${i * 60}ms`,
-                        }}
-                      />
-                    </div>
-                    <span className="text-[10px] text-muted-foreground font-medium">{d.label}</span>
-                  </div>
-                );
-              })}
+        <Reveal show={mounted} delayMs={120}>
+          <div className="flex flex-col gap-3 p-4 rounded-2xl bg-card border border-border shadow-sm">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-primary" aria-hidden="true" />
+              <h3 className="text-sm font-bold">Revenue Overview (Last 7 Days)</h3>
             </div>
-          )}
-        </div>
+            {stats.revenue === 0 ? (
+              <EmptyState
+                icon={BarChart3}
+                title="No revenue data yet"
+                subtitle="Once orders start coming in, your 7-day trend will show up here."
+              />
+            ) : (
+              <div
+                className="flex items-end justify-between gap-1.5 sm:gap-2 h-32 px-1"
+                role="img"
+                aria-label="Bar chart of revenue for the last 7 days"
+              >
+                {revenueTrend.days.map((d, i) => {
+                  const heightPct = Math.max(4, Math.round((d.total / revenueTrend.max) * 100));
+                  return (
+                    <div key={i} className="flex flex-col items-center gap-1.5 flex-1 h-full justify-end min-w-0">
+                      <span className="text-[9px] text-muted-foreground truncate">
+                        {d.total > 0 ? formatINR(d.total) : ""}
+                      </span>
+                      <div className="w-full h-full flex items-end">
+                        <div
+                          className="w-full rounded-md bg-primary/80 transition-all ease-out hover:bg-primary motion-reduce:transition-none"
+                          style={{
+                            height: barsAnimated ? `${heightPct}%` : "0%",
+                            transitionDuration: "700ms",
+                            transitionDelay: `${i * 60}ms`,
+                          }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground font-medium">{d.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </Reveal>
       )}
 
       {/* Order Status Summary chart */}
       {loading ? (
         <ChartSkeleton />
       ) : (
-        <div className="flex flex-col gap-3 p-4 rounded-2xl bg-card border border-border shadow-sm">
-          <div className="flex items-center gap-2">
-            <PieChart className="w-4 h-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-bold">Order Status Summary</h3>
-          </div>
-          {stats.orders === 0 ? (
-            <EmptyState icon={ClipboardList} title="No orders yet" subtitle="Order statuses will show up here." />
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              {statusSummary.counts.map(({ status, count }) => (
-                <div key={status} className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground w-24 sm:w-28 shrink-0 truncate">
-                    {statusLabel(status)}
-                  </span>
-                  <div className="flex-1 h-2.5 rounded-full bg-muted/30 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-700 ease-out ${statusBarColor(status)}`}
-                      style={{ width: barsAnimated ? `${Math.round((count / statusSummary.max) * 100)}%` : "0%" }}
-                    />
-                  </div>
-                  <span className="text-xs font-semibold w-6 text-right shrink-0">{count}</span>
-                </div>
-              ))}
+        <Reveal show={mounted} delayMs={160}>
+          <div className="flex flex-col gap-3 p-4 rounded-2xl bg-card border border-border shadow-sm">
+            <div className="flex items-center gap-2">
+              <PieChart className="w-4 h-4 text-primary" aria-hidden="true" />
+              <h3 className="text-sm font-bold">Order Status Summary</h3>
             </div>
-          )}
-        </div>
+            {stats.orders === 0 ? (
+              <EmptyState icon={ClipboardList} title="No orders yet" subtitle="Order statuses will show up here." />
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {statusSummary.counts.map(({ status, count }) => (
+                  <div key={status} className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground w-24 sm:w-28 shrink-0 truncate">
+                      {statusLabel(status)}
+                    </span>
+                    <div className="flex-1 h-2.5 rounded-full bg-muted/30 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-700 ease-out motion-reduce:transition-none ${statusBarColor(
+                          status
+                        )}`}
+                        style={{ width: barsAnimated ? `${Math.round((count / statusSummary.max) * 100)}%` : "0%" }}
+                      />
+                    </div>
+                    <span className="text-xs font-semibold w-6 text-right shrink-0">{count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Reveal>
       )}
 
       {/* Quick Actions */}
       <div className="flex flex-col gap-3">
         <h3 className="text-sm font-bold">Quick Actions</h3>
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           {QUICK_ACTIONS.map(({ label, icon: Icon, path, color, bg }) => (
             <button
               key={label}
               type="button"
               onClick={() => handleQuickAction(path)}
               aria-label={`Open ${label}`}
-              className="flex flex-col items-center gap-2 p-3.5 rounded-2xl bg-card border border-border shadow-sm transition-all duration-200 ease-out active:scale-90 hover:border-primary/40 hover:-translate-y-1 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="group flex flex-col items-center gap-2 p-3.5 rounded-2xl bg-card border border-border shadow-sm transition-all duration-200 ease-out active:scale-90 hover:border-primary/40 hover:-translate-y-1 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
               <div
                 className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-transform duration-200 group-hover:scale-110 ${bg}`}
               >
                 <Icon className={`w-[18px] h-[18px] ${color}`} aria-hidden="true" />
               </div>
-              <span className="text-xs font-medium">{label}</span>
+              <span className="text-xs font-medium text-center leading-tight">{label}</span>
             </button>
           ))}
         </div>
@@ -888,4 +1050,4 @@ export function AdminDashboard() {
       </div>
     </div>
   );
-}
+    }
