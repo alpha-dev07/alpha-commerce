@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, addDoc } from "firebase/firestore";
+import { collection, addDoc, doc, getDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { useCart } from "../context/CartContext";
 import { formatINR } from "../lib/currency";
@@ -21,10 +21,24 @@ import {
   Tag,
   X,
   BadgePercent,
+  Home,
+  Briefcase,
+  Star,
 } from "lucide-react";
 
 const FREE_DELIVERY_THRESHOLD = 499;
 const DELIVERY_FEE = 49;
+
+interface SavedAddress {
+  id: string;
+  label: string;
+  name: string;
+  phone: string;
+  addressLine: string;
+  city: string;
+  pincode: string;
+  isDefault: boolean;
+}
 
 interface FormState {
   name: string;
@@ -80,6 +94,11 @@ export function Checkout() {
   const [placing, setPlacing] = useState(false);
   const [placeError, setPlaceError] = useState("");
 
+  // Saved addresses
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [loadingAddresses, setLoadingAddresses] = useState(true);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+
   // Coupon state
   const [couponInput, setCouponInput] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
@@ -91,10 +110,32 @@ export function Checkout() {
   const discount = appliedCoupon?.discountAmount ?? 0;
   const orderTotal = Math.max(0, totalPrice + deliveryFee - discount);
 
+  const hasSavedAddresses = savedAddresses.length > 0;
+
   // Guard: empty cart
   useEffect(() => {
     if (items.length === 0) navigate("/cart", { replace: true });
   }, [items.length, navigate]);
+
+  // Load saved addresses
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) {
+      setLoadingAddresses(false);
+      return;
+    }
+    const userDocRef = doc(db, "users", user.uid);
+    getDoc(userDocRef)
+      .then((snap) => {
+        const addrs = (snap.exists() ? (snap.data().addresses as SavedAddress[]) : []) ?? [];
+        setSavedAddresses(addrs);
+        if (addrs.length > 0) {
+          const def = addrs.find((a) => a.isDefault) ?? addrs[0];
+          setSelectedAddressId(def.id);
+        }
+      })
+      .finally(() => setLoadingAddresses(false));
+  }, []);
 
   // Clear coupon if cart changes (subtotal drops below min)
   useEffect(() => {
@@ -146,7 +187,27 @@ export function Checkout() {
   };
 
   const handlePlaceOrder = async () => {
-    if (!validate()) return;
+    // Determine which delivery address to use
+    let deliveryAddress: FormState;
+
+    if (hasSavedAddresses) {
+      const chosen = savedAddresses.find((a) => a.id === selectedAddressId);
+      if (!chosen) {
+        setPlaceError("Please select a delivery address.");
+        return;
+      }
+      deliveryAddress = {
+        name: chosen.name,
+        phone: chosen.phone,
+        addressLine: chosen.addressLine,
+        city: chosen.city,
+        pincode: chosen.pincode,
+      };
+    } else {
+      if (!validate()) return;
+      deliveryAddress = { ...form };
+    }
+
     setPlaceError("");
     setPlacing(true);
 
@@ -158,11 +219,11 @@ export function Checkout() {
         userId: user.uid,
         items: items.map(({ product, quantity }) => ({ product, quantity })),
         deliveryAddress: {
-          name: form.name.trim(),
-          phone: form.phone.trim(),
-          addressLine: form.addressLine.trim(),
-          city: form.city.trim(),
-          pincode: form.pincode.trim(),
+          name: deliveryAddress.name.trim(),
+          phone: deliveryAddress.phone.trim(),
+          addressLine: deliveryAddress.addressLine.trim(),
+          city: deliveryAddress.city.trim(),
+          pincode: deliveryAddress.pincode.trim(),
         },
         paymentMethod: "cash_on_delivery",
         subtotal: totalPrice,
@@ -223,63 +284,133 @@ export function Checkout() {
             <span className="text-sm font-bold">Delivery Details</span>
           </div>
 
-          <Field label="Full Name" icon={User} error={errors.name}>
-            <input
-              type="text"
-              value={form.name}
-              onChange={set("name")}
-              placeholder="John Smith"
-              className={errors.name ? errorInputCls : inputCls}
-              data-testid="input-checkout-name"
-            />
-          </Field>
+          {loadingAddresses ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : hasSavedAddresses ? (
+            /* ── Saved address selector ── */
+            <div className="flex flex-col gap-2.5" data-testid="saved-address-selector">
+              {savedAddresses.map((addr) => {
+                const selected = addr.id === selectedAddressId;
+                return (
+                  <button
+                    key={addr.id}
+                    type="button"
+                    onClick={() => setSelectedAddressId(addr.id)}
+                    data-testid={`select-address-${addr.id}`}
+                    className={`flex flex-col gap-2 p-3.5 rounded-2xl border text-left transition-colors ${
+                      selected
+                        ? "border-primary bg-primary/[0.05]"
+                        : "border-border bg-background"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                          {addr.label === "Work" ? (
+                            <Briefcase className="w-3 h-3 text-primary" />
+                          ) : (
+                            <Home className="w-3 h-3 text-primary" />
+                          )}
+                        </div>
+                        <span className="text-sm font-bold">{addr.label}</span>
+                        {addr.isDefault && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                            Default
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          selected ? "border-primary" : "border-border"
+                        }`}
+                      >
+                        {selected && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-0.5 pl-8">
+                      <span className="text-sm font-semibold">{addr.name}</span>
+                      <span className="text-xs text-muted-foreground">{addr.addressLine}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {addr.city} — {addr.pincode}
+                      </span>
+                      <span className="text-xs text-muted-foreground">📞 {addr.phone}</span>
+                    </div>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => navigate("/addresses")}
+                className="flex items-center justify-center gap-1.5 mt-1 text-xs font-medium text-primary active:opacity-70"
+              >
+                <Star className="w-3.5 h-3.5" />
+                Manage saved addresses
+              </button>
+            </div>
+          ) : (
+            /* ── No saved addresses: manual form ── */
+            <>
+              <Field label="Full Name" icon={User} error={errors.name}>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={set("name")}
+                  placeholder="John Smith"
+                  className={errors.name ? errorInputCls : inputCls}
+                  data-testid="input-checkout-name"
+                />
+              </Field>
 
-          <Field label="Phone Number" icon={Phone} error={errors.phone}>
-            <input
-              type="tel"
-              value={form.phone}
-              onChange={set("phone")}
-              placeholder="+91 98765 43210"
-              className={errors.phone ? errorInputCls : inputCls}
-              data-testid="input-checkout-phone"
-            />
-          </Field>
+              <Field label="Phone Number" icon={Phone} error={errors.phone}>
+                <input
+                  type="tel"
+                  value={form.phone}
+                  onChange={set("phone")}
+                  placeholder="+91 98765 43210"
+                  className={errors.phone ? errorInputCls : inputCls}
+                  data-testid="input-checkout-phone"
+                />
+              </Field>
 
-          <Field label="Street Address" icon={MapPin} error={errors.addressLine}>
-            <input
-              type="text"
-              value={form.addressLine}
-              onChange={set("addressLine")}
-              placeholder="123 Main St, Apt 4B"
-              className={errors.addressLine ? errorInputCls : inputCls}
-              data-testid="input-checkout-address"
-            />
-          </Field>
+              <Field label="Street Address" icon={MapPin} error={errors.addressLine}>
+                <input
+                  type="text"
+                  value={form.addressLine}
+                  onChange={set("addressLine")}
+                  placeholder="123 Main St, Apt 4B"
+                  className={errors.addressLine ? errorInputCls : inputCls}
+                  data-testid="input-checkout-address"
+                />
+              </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="City" icon={Building} error={errors.city}>
-              <input
-                type="text"
-                value={form.city}
-                onChange={set("city")}
-                placeholder="Mumbai"
-                className={errors.city ? errorInputCls : inputCls}
-                data-testid="input-checkout-city"
-              />
-            </Field>
-            <Field label="Pincode" icon={Hash} error={errors.pincode}>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={form.pincode}
-                onChange={set("pincode")}
-                placeholder="400001"
-                maxLength={6}
-                className={errors.pincode ? errorInputCls : inputCls}
-                data-testid="input-checkout-pincode"
-              />
-            </Field>
-          </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="City" icon={Building} error={errors.city}>
+                  <input
+                    type="text"
+                    value={form.city}
+                    onChange={set("city")}
+                    placeholder="Mumbai"
+                    className={errors.city ? errorInputCls : inputCls}
+                    data-testid="input-checkout-city"
+                  />
+                </Field>
+                <Field label="Pincode" icon={Hash} error={errors.pincode}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.pincode}
+                    onChange={set("pincode")}
+                    placeholder="400001"
+                    maxLength={6}
+                    className={errors.pincode ? errorInputCls : inputCls}
+                    data-testid="input-checkout-pincode"
+                  />
+                </Field>
+              </div>
+            </>
+          )}
         </div>
 
         {/* ── Payment Method ── */}
@@ -486,3 +617,4 @@ export function Checkout() {
     </div>
   );
 }
+
