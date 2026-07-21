@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { PromoBanner } from "../components/PromoBanner";
 import { ProductCard } from "../components/ProductCard";
@@ -82,7 +82,7 @@ export function Home() {
     setSavingAddressId(id);
     setShowAddressSheet(false);
     try {
-      await updateDoc(doc(db, "users", user.uid), { addresses: updated });
+      await setDoc(doc(db, "users", user.uid), { addresses: updated }, { merge: true });
     } catch (err) {
       console.error(err);
       setAddresses(previous);
@@ -336,3 +336,4 @@ export function Home() {
     </div>
   );
 }
+
