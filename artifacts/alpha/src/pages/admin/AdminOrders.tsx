@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { collection, onSnapshot, doc, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  doc,
+  getDoc,
+  updateDoc,
+  setDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 import { db } from "../../firebase";
 import { formatINR } from "../../lib/currency";
 import { formatDate } from "../../lib/dateFormat";
@@ -56,6 +64,77 @@ const STATUS_OPTIONS: OrderStatus[] = [
   "delivered",
 ];
 
+// Customer-facing copy for each status. Extend this if you add more
+// OrderStatus values (e.g. "processing", "shipped", "cancelled").
+const STATUS_MESSAGES: Record<OrderStatus, { title: string; message: string }> = {
+  confirmed: {
+    title: "Order Confirmed",
+    message: "Your order has been confirmed and will be prepared shortly.",
+  },
+  preparing: {
+    title: "Order Being Prepared",
+    message: "Your order is now being prepared.",
+  },
+  out_for_delivery: {
+    title: "Out for Delivery",
+    message: "Your order is on its way!",
+  },
+  delivered: {
+    title: "Order Delivered",
+    message: "Your order has been delivered. Enjoy!",
+  },
+};
+
+/**
+ * Creates (or updates) the customer notification for an order status change.
+ * The document ID is deterministic — `${order.id}_${newStatus}` — so there is
+ * always exactly one notification per order/status pair:
+ *   - First time this status is reached for this order: a new notification
+ *     document is created with createdAt set.
+ *   - If the same status is ever reached again for the same order (e.g. the
+ *     admin reverts it and re-applies it later): the existing document is
+ *     updated in place (title/message/read reset, updatedAt bumped) rather
+ *     than a new document being created, and the original createdAt is kept.
+ */
+async function createStatusNotification(order: Order, newStatus: OrderStatus) {
+  const userId = (order as any).userId ?? (order as any).customerId;
+  if (!userId) return; // no user to notify
+
+  const copy = STATUS_MESSAGES[newStatus];
+  if (!copy) return;
+
+  const notificationId = `${order.id}_${newStatus}`;
+  const notificationRef = doc(db, "users", userId, "notifications", notificationId);
+
+  const existing = await getDoc(notificationRef);
+
+  if (existing.exists()) {
+    // Update the existing notification for this order/status instead of
+    // creating a duplicate.
+    await updateDoc(notificationRef, {
+      userId,
+      orderId: order.id,
+      type: "order_status",
+      title: copy.title,
+      message: copy.message,
+      status: newStatus,
+      read: false,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    await setDoc(notificationRef, {
+      userId,
+      orderId: order.id,
+      type: "order_status",
+      title: copy.title,
+      message: copy.message,
+      status: newStatus,
+      read: false,
+      createdAt: serverTimestamp(),
+    });
+  }
+}
+
 function OrderCard({ order }: { order: Order }) {
   const [expanded, setExpanded] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -69,6 +148,11 @@ function OrderCard({ order }: { order: Order }) {
     setUpdating(true);
     try {
       await updateDoc(doc(db, "orders", order.id), { status: newStatus });
+      try {
+        await createStatusNotification(order, newStatus);
+      } catch {
+        /* notification failure should not block the status update */
+      }
     } catch {
       /* silent */
     } finally {
@@ -332,3 +416,4 @@ export function AdminOrders() {
     </div>
   );
 }
+
