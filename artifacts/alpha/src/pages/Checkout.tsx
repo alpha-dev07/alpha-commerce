@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, addDoc, doc, getDoc } from "firebase/firestore";
+import { collection, addDoc, doc, getDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { useCart } from "../context/CartContext";
 import { formatINR } from "../lib/currency";
@@ -244,6 +244,15 @@ export function Checkout() {
           appliedCoupon.discountAmount
         );
       }
+
+      // Create an order-confirmation notification for the user
+      await addDoc(collection(db, "users", user.uid, "notifications"), {
+        category: "orders",
+        title: "Order placed",
+        message: `Your order for ${formatINR(orderTotal)} has been confirmed.`,
+        read: false,
+        createdAt: serverTimestamp(),
+      });
 
       clearCart();
       navigate("/orders", { state: { newOrder: true }, replace: true });
