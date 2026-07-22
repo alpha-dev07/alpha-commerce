@@ -18,7 +18,7 @@ interface Address {
   label: string;
   line1: string;
   city: string;
-  zip: string;
+  pincode: string;
   isDefault: boolean;
 }
 
@@ -126,7 +126,7 @@ export function Home() {
             </span>
             <span className="text-sm font-semibold flex items-center gap-1">
               {defaultAddress
-                ? `${defaultAddress.label}${defaultAddress.zip ? ` · ${defaultAddress.zip}` : ""}`
+                ? `${defaultAddress.label}${defaultAddress.pincode ? ` · ${defaultAddress.pincode}` : ""}`
                 : "Home · 10001"}{" "}
               <span className="text-primary text-xs">▼</span>
             </span>
@@ -321,7 +321,7 @@ export function Home() {
                       <div className="flex flex-col flex-1 min-w-0">
                         <span className="text-sm font-semibold">{address.label}</span>
                         <span className="text-xs text-muted-foreground truncate">
-                          {address.line1}, {address.city} {address.zip}
+                          {address.line1}, {address.city} {address.pincode}
                         </span>
                       </div>
                       {savingAddressId === address.id ? (
@@ -340,5 +340,4 @@ export function Home() {
     </div>
   );
 }
-
 
