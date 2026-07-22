@@ -126,7 +126,7 @@ export function Home() {
             </span>
             <span className="text-sm font-semibold flex items-center gap-1">
               {defaultAddress
-                ? `${defaultAddress.label} · ${defaultAddress.zip}`
+                ? `${defaultAddress.label}${defaultAddress.zip ? ` · ${defaultAddress.zip}` : ""}`
                 : "Home · 10001"}{" "}
               <span className="text-primary text-xs">▼</span>
             </span>
@@ -340,4 +340,5 @@ export function Home() {
     </div>
   );
 }
+
 
