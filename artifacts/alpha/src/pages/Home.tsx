@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { PromoBanner } from "../components/PromoBanner";
+import { BannerCarousel } from "../components/BannerCarousel";
 import { ProductCard } from "../components/ProductCard";
 import { BottomNav } from "../components/BottomNav";
 import { SearchBar } from "../components/SearchBar";
@@ -147,6 +148,9 @@ export function Home() {
 
       {/* Body */}
       <div className="flex flex-col gap-6 px-4 py-4">
+        {/* Offer Banner Carousel — sits directly below the search bar */}
+        <BannerCarousel />
+
         {loading ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3">
             <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
