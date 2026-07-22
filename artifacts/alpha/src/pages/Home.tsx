@@ -10,7 +10,6 @@ import { SearchBar } from "../components/SearchBar";
 import { CategoryFilter } from "../components/CategoryFilter";
 import { useProducts } from "../hooks/useProducts";
 import { useAuth } from "../context/AuthContext";
-import { seedProductsIfEmpty } from "../lib/seedProducts";
 import { Bell, Package, MapPin, X, Check, Loader2 } from "lucide-react";
 
 interface Address {
@@ -34,10 +33,6 @@ export function Home() {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [addressesLoading, setAddressesLoading] = useState(true);
   const [savingAddressId, setSavingAddressId] = useState<string | null>(null);
-
-  useEffect(() => {
-    seedProductsIfEmpty().catch(console.error);
-  }, []);
 
   useEffect(() => {
     if (!user) {
@@ -193,6 +188,15 @@ export function Home() {
               </div>
             )}
           </div>
+        ) : products.length === 0 ? (
+          /* ── No Products In Firestore ── */
+          <div
+            className="flex flex-col items-center justify-center py-24 gap-3"
+            data-testid="empty-products"
+          >
+            <Package className="w-12 h-12 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">No products available</p>
+          </div>
         ) : (
           /* ── Default Home View ── */
           <>
@@ -205,7 +209,7 @@ export function Home() {
             <PromoBanner />
 
             {/* Featured */}
-            {(loading || featured.length > 0) && (
+            {featured.length > 0 && (
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold">Featured</h3>
@@ -228,7 +232,7 @@ export function Home() {
             )}
 
             {/* Best Sellers */}
-            {(loading || bestSellers.length > 0) && (
+            {bestSellers.length > 0 && (
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold">Best Sellers</h3>
@@ -251,7 +255,7 @@ export function Home() {
             )}
 
             {/* All products fallback — when no featured/bestSeller flags yet */}
-            {!loading && featured.length === 0 && bestSellers.length === 0 && products.length > 0 && (
+            {featured.length === 0 && bestSellers.length === 0 && products.length > 0 && (
               <div className="flex flex-col gap-3">
                 <h3 className="text-lg font-bold">All Products</h3>
                 <div className="grid grid-cols-2 gap-3">
