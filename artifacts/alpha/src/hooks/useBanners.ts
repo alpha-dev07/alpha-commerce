@@ -10,7 +10,7 @@ export interface Banner {
   targetType: "product" | "category";
   targetId: string;
   isActive: boolean;
-  priority: number;
+  priority: number | string;
 }
 
 export function useBanners() {
@@ -34,7 +34,7 @@ export function useBanners() {
           // Only show active banners
           .filter((b) => b.isActive === true)
           // Sort by priority (ascending — lower number = shown first)
-          .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+          .sort((a, b) => Number(a.priority || 0) - Number(b.priority || 0));
 
         setBanners(list);
         setError(null);
@@ -54,3 +54,4 @@ export function useBanners() {
 
   return { banners, loading, error };
 }
+
