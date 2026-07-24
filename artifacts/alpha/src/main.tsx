@@ -25,7 +25,6 @@ async function initOneSignal() {
         enable: false,
         prenotify: false,
         showCredit: false,
-        text: {},
       },
     });
 
