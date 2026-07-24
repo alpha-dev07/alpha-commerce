@@ -339,14 +339,19 @@ export function AdminDashboard() {
   // Trigger the bar-chart grow-in animation + section reveal once initial
   // data has settled.
   useEffect(() => {
-    if (!loadingOrders) {
-      const id = requestAnimationFrame(() => {
-        setBarsAnimated(true);
-        setMounted(true);
-      });
-      return () => cancelAnimationFrame(id);
-    }
-  }, [loadingOrders]);
+  if (loadingOrders) {
+    return;
+  }
+
+  const id = requestAnimationFrame(() => {
+    setBarsAnimated(true);
+    setMounted(true);
+  });
+
+  return () => {
+    cancelAnimationFrame(id);
+  };
+}, [loadingOrders]);
 
   const loading = loadingOrders || loadingProducts || loadingCustomers;
 
