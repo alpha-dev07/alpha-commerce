@@ -11,6 +11,9 @@ async function start() {
     serviceWorkerParam: { scope: "/" },
     notifyButton: {
       enable: false,
+      prenotify: false,
+      showCredit: false,
+      text: {},
     },
   });
 
