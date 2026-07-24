@@ -21,11 +21,6 @@ async function initOneSignal() {
       appId: "6aa9d9b0-5f97-4b5a-be06-c700d7e63c83",
       serviceWorkerPath: "/OneSignalSDKWorker.js",
       serviceWorkerParam: { scope: "/" },
-      notifyButton: {
-        enable: false,
-        prenotify: false,
-        showCredit: false,
-      },
     });
 
     if (import.meta.env.DEV) {
