@@ -10,11 +10,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   </React.StrictMode>
 );
 
-// Fire-and-forget push setup. Never allowed to block or crash app startup.
 async function initOneSignal() {
   try {
     if (typeof window === "undefined" || typeof Notification === "undefined") {
-      return; // No Notifications API (common in WebView) — skip entirely
+      return;
     }
 
     await OneSignal.init({
@@ -27,10 +26,9 @@ async function initOneSignal() {
       OneSignal.Debug.setLogLevel("trace");
     }
 
-    // Don't await this — some WebViews never resolve the permission prompt.
     OneSignal.Notifications.requestPermission().catch(() => {});
   } catch (err) {
-    console.warn("OneSignal init failed, continuing without push:", err);
+    console.warn("OneSignal init failed:", err);
   }
 }
 
